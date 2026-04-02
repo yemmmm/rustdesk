@@ -273,34 +273,61 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
       // clipboard
       oldValue = '';
     }
-    if (newValue.length == oldValue.length) {
-      // ?
-    } else if (newValue.length < oldValue.length) {
-      final char = 'VK_BACK';
-      inputModel.inputKey(char);
-    } else {
-      final content = newValue.substring(oldValue.length);
-      if (content.length > 1) {
-        if (oldValue != '' &&
-            content.length == 2 &&
-            (content == '""' ||
-                content == '()' ||
-                content == '[]' ||
-                content == '<>' ||
-                content == "{}" ||
-                content == '”“' ||
-                content == '《》' ||
-                content == '（）' ||
-                content == '【】')) {
-          // can not only input content[0], because when input ], [ are also auo insert, which cause ] never be input
-          bind.sessionInputString(sessionId: sessionId, value: content);
-          openKeyboard();
-          return;
-        }
-        bind.sessionInputString(sessionId: sessionId, value: content);
-      } else {
-        inputChar(content);
+
+    // Compute actual diff using common prefix, to handle both append and replace.
+    // Chinese IMEs often replace composing text (pinyin) with committed text (hanzi).
+    var common = 0;
+    for (; common < oldValue.length && common < newValue.length; common++) {
+      if (oldValue[common] != newValue[common]) break;
+    }
+
+    final deletedCount = oldValue.length - common;
+    final newContent = newValue.substring(common);
+
+    // Check composing state — during IME composition (e.g. pinyin input),
+    // the text is not finalized yet. Skip sending events to remote.
+    // But allow the event through if the committed text is at least as long
+    // as the composing range, to handle the commit boundary correctly.
+    if (_textController.value.isComposingRangeValid) {
+      final composingLength = _textController.value.composing.end -
+          _textController.value.composing.start;
+      if (composingLength > newContent.length) {
+        // Still composing — restore _value which tracks last committed state,
+        // NOT the current text field content (which may include composing text).
+        _value = oldValue;
+        return;
       }
+    }
+
+    // Send backspace events for deleted characters (handles replacement)
+    for (var i = 0; i < deletedCount; i++) {
+      inputModel.inputKey('VK_BACK');
+    }
+
+    // Send new content
+    if (newContent.isEmpty) return;
+
+    if (newContent.length > 1) {
+      if (oldValue != '' &&
+          deletedCount == 0 &&
+          newContent.length == 2 &&
+          (newContent == '””' ||
+              newContent == '()' ||
+              newContent == '[]' ||
+              newContent == '<>' ||
+              newContent == “{}” ||
+              newContent == '””' ||
+              newContent == '《》' ||
+              newContent == '（）' ||
+              newContent == '【】')) {
+        // can not only input content[0], because when input ], [ are also auto insert, which cause ] never be input
+        bind.sessionInputString(sessionId: sessionId, value: newContent);
+        openKeyboard();
+        return;
+      }
+      bind.sessionInputString(sessionId: sessionId, value: newContent);
+    } else {
+      inputChar(newContent);
     }
   }
 
